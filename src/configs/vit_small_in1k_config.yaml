@@ -1,0 +1,48 @@
+experiment:
+  name: vit_small_in1k_sgreid
+  output_root: outputs/oe2_sgreid
+  seed: 42
+
+data:
+  root: D:/tesis_dev/result1/dataset/output
+  index_csv: processed/sgreid_v2_split.csv
+  image_size: [256, 128]
+  sequence_len: 16
+  num_workers: 4
+  color_jitter: true
+  max_instances_per_pid: 32
+
+model:
+  arch: vit
+  backbone: vit_small_patch16_224.augreg_in1k
+  pretrained: true
+  embed_dim: 512
+  dropout: 0.1
+
+train:
+  epochs: 30
+  val_freq: 1
+  batch:
+    P: 4
+    K: 4
+  optimizer:
+    lr: 0.0002
+    weight_decay: 0.05
+    backbone_lr_mult: 0.1
+  scheduler:
+    warmup_epochs: 3
+  progressive_finetune:
+    enabled: true
+    freeze_epochs: 3
+    partial_unfreeze_epochs: 8
+
+loss:
+  ce:
+    label_smoothing: 0.1
+    weight: 1.0
+  triplet:
+    margin: 0.3
+    weight: 1.0
+
+eval:
+  normalize_embeddings: true

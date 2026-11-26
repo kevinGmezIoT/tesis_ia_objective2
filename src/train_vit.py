@@ -13,6 +13,9 @@ def main():
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--exp-name", type=str, default=None)
     parser.add_argument("--output-root", type=str, default=None)
+    parser.add_argument("--index-csv", type=str, default=None)
+    parser.add_argument("--data-root", type=str, default=None)
+    parser.add_argument("--backbone", type=str, default=None)
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -24,6 +27,12 @@ def main():
         cfg["experiment"]["name"] = args.exp_name
     if args.output_root is not None:
         cfg["experiment"]["output_root"] = args.output_root
+    if args.index_csv is not None:
+        cfg["data"]["index_csv"] = args.index_csv
+    if args.data_root is not None:
+        cfg["data"]["root"] = args.data_root
+    if args.backbone is not None:
+        cfg["model"]["backbone"] = args.backbone
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

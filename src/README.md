@@ -105,3 +105,22 @@ python evaluate_categorized.py --config configs/vit_config.yaml --checkpoint pat
 
 ### Análisis Cualitativo
 Utiliza `visualize_embeddings.py` para generar mapas t-SNE que demuestren visualmente cómo el modelo agrupa las identidades en el espacio latente.
+
+---
+
+## 7. Validación Cruzada Open-Set 5-Fold (Pares Ambiguos en Prueba)
+
+Para evaluar a las 72 identidades multicámara fuera de entrenamiento (*out-of-fold*, garantizando pares de alta similitud interclase compitiendo directamente en `test`):
+
+```bash
+# 1. Generar los 5 pliegues (semilla maestra 42; ajustar --images-root en Linux)
+python src/preprocess/prepare_sgreid_5fold.py --images-root /ruta/al/dataset/result1/dataset/output
+
+# 2. Ejecutar los 5 pliegues para CNN, ViT-Base y ViT-Small (reanudable)
+python run_oe2_5fold.py --data-root /ruta/al/dataset/result1/dataset/output
+
+# (Opcional) Incluir control ImageNet-1k para ViT-Small
+python run_oe2_5fold.py --data-root /ruta/al/dataset/result1/dataset/output --include-in1k-control
+```
+
+La agregación estadística con media ± desviación estándar y pruebas pareadas sobre las 72 identidades independientes se genera en `outputs/oe2_sgreid_5fold/summary_5fold.json` mediante `src/aggregate_5fold.py`.

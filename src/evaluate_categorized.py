@@ -1,4 +1,5 @@
 import argparse
+from collections import defaultdict
 import json
 import os
 import time
@@ -104,6 +105,8 @@ def main():
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to model checkpoint")
     parser.add_argument("--arch", type=str, choices=["vit", "cnn"], required=True)
     parser.add_argument("--input-csv", type=str, default=None, help="Override CSV path")
+    parser.add_argument("--data-root", type=str, default=None, help="Override data root directory")
+    parser.add_argument("--exp-name", type=str, default=None, help="Override experiment name")
     parser.add_argument("--split", type=str, default="test")
     parser.add_argument("--allow-unsplit", action="store_true")
     parser.add_argument("--output-dir", type=str, default=None)
@@ -115,6 +118,10 @@ def main():
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    if args.data_root is not None:
+        cfg["data"]["root"] = args.data_root
+    if args.exp_name is not None:
+        cfg["experiment"]["name"] = args.exp_name
     index_csv = args.input_csv or cfg["data"]["index_csv"]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -203,6 +210,14 @@ def main():
     overall_metrics, per_query_ap, valid_q_indices = compute_subset_metrics(
         all_features, pids, camids, all_features, pids, camids, return_per_query=True
     )
+    per_pid_aps_raw = defaultdict(list)
+    for q_idx, ap_val in zip(valid_q_indices, per_query_ap):
+        per_pid_aps_raw[int(pids[q_idx])].append(float(ap_val))
+    per_pid_ap = {
+        str(pid): {"ap": float(np.mean(aps)), "n_queries": int(len(aps))}
+        for pid, aps in sorted(per_pid_aps_raw.items())
+    }
+    overall_metrics["macro_mAP"] = float(np.mean([v["ap"] for v in per_pid_ap.values()])) if per_pid_ap else 0.0
 
     def get_categorized_metrics(labels, category_name):
         unique_cats = sorted(set(labels))
@@ -277,6 +292,48 @@ def main():
                 q_feat, q_pids, q_camids, q_feat, q_pids, q_camids
             )
 
+            partner_map = defaultdict(set)
+            for _, row_p in both_pairs.iterrows():
+                px = int(row_p["person_global_id_x"])
+                py = int(row_p["person_global_id_y"])
+                partner_map[px].add(py)
+                partner_map[py].add(px)
+
+            distmat = torch.cdist(all_features, all_features).cpu().numpy()
+            pids_arr = np.asarray(pids)
+            camids_arr = np.asarray(camids)
+            total_partner_queries = 0
+            rank1_errors = 0
+            partner_rank1_confusions = 0
+
+            for i in range(len(pids)):
+                q_pid = int(pids[i])
+                if q_pid not in partner_map:
+                    continue
+                keep = ~((pids_arr == q_pid) & (camids_arr == camids[i]))
+                if not np.any(pids_arr[keep] == q_pid):
+                    continue
+                valid_gal_indices = np.flatnonzero(keep)
+                best_gal_idx = valid_gal_indices[int(np.argmin(distmat[i, valid_gal_indices]))]
+                pred_pid = int(pids[best_gal_idx])
+                total_partner_queries += 1
+                if pred_pid != q_pid:
+                    rank1_errors += 1
+                    if pred_pid in partner_map[q_pid]:
+                        partner_rank1_confusions += 1
+
+            ambiguous_eval["ambiguous_partner_rank1_confusion"] = {
+                "total_queries": int(total_partner_queries),
+                "rank1_errors": int(rank1_errors),
+                "partner_rank1_confusions": int(partner_rank1_confusions),
+                "partner_confusion_rate_over_queries": float(partner_rank1_confusions / total_partner_queries)
+                if total_partner_queries > 0
+                else 0.0,
+                "partner_confusion_share_of_errors": float(partner_rank1_confusions / rank1_errors)
+                if rank1_errors > 0
+                else None,
+            }
+
         if len(amb_pids_any) >= 2:
             mask_any = np.array([p in amb_pids_any for p in pids])
             q_feat = all_features[mask_any]
@@ -297,6 +354,7 @@ def main():
         "illumination": illum_metrics,
         "occlusion": occl_metrics,
         "cross_illum_occl": cross_metrics,
+        "per_pid_ap": per_pid_ap,
         "ambiguous_pairs": ambiguous_eval,
     }
 
@@ -312,8 +370,9 @@ def main():
         json.dump(final_results, f, indent=4, ensure_ascii=False)
 
     valid_seq_ids = np.array([all_seq_ids[i] for i in valid_q_indices])
+    valid_pids = np.asarray([pids[i] for i in valid_q_indices], dtype=np.int64)
     npz_file = os.path.join(output_dir, f"per_query_ap_{args.arch}.npz")
-    np.savez(npz_file, sequence_id=valid_seq_ids, ap=np.asarray(per_query_ap, dtype=np.float64))
+    np.savez(npz_file, sequence_id=valid_seq_ids, person_id=valid_pids, ap=np.asarray(per_query_ap, dtype=np.float64))
 
     print(f"\nResults saved to {out_file} and {npz_file}")
 
